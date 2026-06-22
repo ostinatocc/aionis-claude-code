@@ -1,0 +1,30 @@
+{
+  "name": "aionis-claude-code-repo",
+  "private": true,
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Claude Code plugin, MCP hooks, and lifecycle integration for Aionis execution memory.",
+  "homepage": "https://docs.aionis.work/integrations/claude-code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ostinatocc/aionis-claude-code.git"
+  },
+  "workspaces": [
+    "packages/aionis-claude-code"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "npm run -w @aionis/claude-code -s build",
+    "test": "node --test scripts/ci/*.mjs && npm run -w @aionis/claude-code -s test",
+    "typecheck": "npm run -w @aionis/claude-code -s build",
+    "plugin:validate": "claude plugin validate . && claude plugin validate claude-plugins/aionis"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.22.4",
+    "typescript": "^5.6.3"
+  }
+}
