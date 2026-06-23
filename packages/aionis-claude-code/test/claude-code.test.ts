@@ -237,6 +237,7 @@ test("@aionis/claude-code UserPromptSubmit injects compiled Aionis context", asy
   }, baseOptions({ repo_root: dir }), fakeClient(calls));
 
   assert.equal(calls[0].method, "guideForRole");
+  assert.match((calls[0].input as { task_signature: string }).task_signature, /:workspace$/);
   assert.ok(output);
   const parsed = JSON.parse(output ?? "{}") as { hookSpecificOutput: { additionalContext: string } };
   assert.match(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_MEMORY_CONTEXT/);
@@ -263,10 +264,156 @@ test("@aionis/claude-code PostToolUse records execution evidence", async () => {
 
   assert.equal(output, null);
   assert.equal(calls[0].method, "observeStep");
-  const input = calls[0].input as { outcome: string; target_files: string[]; tool_set: string[] };
+  const input = calls[0].input as { outcome: string; target_files: string[]; tool_set: string[]; task_signature: string };
   assert.equal(input.outcome, "succeeded");
   assert.deepEqual(input.target_files, ["/tmp/project/src/app.ts"]);
   assert.deepEqual(input.tool_set, ["Edit"]);
+  assert.match(input.task_signature, /:workspace$/);
+});
+
+test("@aionis/claude-code SessionEnd promotes verified edited files into handoff", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-verified-session-"));
+  const options = baseOptions({ repo_root: dir });
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-verified",
+    cwd: dir,
+    hook_event_name: "PostToolUse",
+    tool_name: "Edit",
+    tool_use_id: "edit-1",
+    tool_input: {
+      file_path: path.join(dir, "src/total.js"),
+      old_string: "old",
+      new_string: "new",
+    },
+    tool_response: { ok: true },
+  }, options, fakeClient(calls));
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-verified",
+    cwd: dir,
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_use_id: "bash-1",
+    tool_input: { command: "npm test" },
+    tool_response: { stdout: "pass" },
+  }, options, fakeClient(calls));
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-verified",
+    cwd: dir,
+    hook_event_name: "SessionEnd",
+    reason: "end_turn",
+  }, options, fakeClient(calls));
+
+  assert.equal(calls.at(-1)?.method, "handoff");
+  const handoff = calls.at(-1)?.input as {
+    outcome: string;
+    target_files: string[];
+    acceptance_checks: string[];
+    next_action: string;
+    handoff_text: string;
+    slots: { verified_route: boolean; successful_validation_command: string };
+  };
+  assert.equal(handoff.outcome, "succeeded");
+  assert.deepEqual(handoff.target_files, [path.join(dir, "src/total.js")]);
+  assert.deepEqual(handoff.acceptance_checks, ["npm test passed"]);
+  assert.match(handoff.next_action, /verified Claude Code route/);
+  assert.match(handoff.handoff_text, /Verified continuation route/);
+  assert.equal(handoff.slots.verified_route, true);
+  assert.equal(handoff.slots.successful_validation_command, "npm test");
+});
+
+test("@aionis/claude-code SessionEnd keeps failed commands as evidence after later validation passes", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-failed-then-pass-"));
+  const options = baseOptions({ repo_root: dir });
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-failed-then-pass",
+    cwd: dir,
+    hook_event_name: "PostToolUseFailure",
+    tool_name: "Bash",
+    tool_use_id: "bash-failed",
+    tool_input: { command: "npm test" },
+    tool_response: { stderr: "fail" },
+  }, options, fakeClient(calls));
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-failed-then-pass",
+    cwd: dir,
+    hook_event_name: "PostToolUse",
+    tool_name: "Edit",
+    tool_use_id: "edit-1",
+    tool_input: { file_path: path.join(dir, "src/total.js") },
+    tool_response: { ok: true },
+  }, options, fakeClient(calls));
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-failed-then-pass",
+    cwd: dir,
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_use_id: "bash-passed",
+    tool_input: { command: "npm test" },
+    tool_response: { stdout: "pass" },
+  }, options, fakeClient(calls));
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-failed-then-pass",
+    cwd: dir,
+    hook_event_name: "SessionEnd",
+    reason: "end_turn",
+  }, options, fakeClient(calls));
+
+  assert.equal(calls.at(-1)?.method, "handoff");
+  const handoff = calls.at(-1)?.input as {
+    outcome: string;
+    evidence: Array<{ kind: string; value: string[] }>;
+    handoff_text: string;
+    slots: { failed_commands: string[]; verified_route: boolean };
+  };
+  assert.equal(handoff.outcome, "succeeded");
+  assert.equal(handoff.slots.verified_route, true);
+  assert.deepEqual(handoff.slots.failed_commands, ["npm test"]);
+  assert.ok(handoff.evidence.some((entry) => entry.kind === "failed_commands_counter_evidence" && entry.value.includes("npm test")));
+  assert.match(handoff.handoff_text, /Failed commands are prior evidence only, not continuation routes/);
+});
+
+test("@aionis/claude-code SessionEnd remains unknown without a verified edit route", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-unverified-session-"));
+  const options = baseOptions({ repo_root: dir });
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-unverified",
+    cwd: dir,
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_use_id: "bash-1",
+    tool_input: { command: "npm test" },
+    tool_response: { stdout: "pass" },
+  }, options, fakeClient(calls));
+
+  await handleAionisClaudeCodeHook({
+    session_id: "session-unverified",
+    cwd: dir,
+    hook_event_name: "SessionEnd",
+    reason: "other",
+  }, options, fakeClient(calls));
+
+  assert.equal(calls.at(-1)?.method, "handoff");
+  const handoff = calls.at(-1)?.input as {
+    outcome: string;
+    target_files?: string[];
+    acceptance_checks?: string[];
+    slots: { verified_route: boolean };
+  };
+  assert.equal(handoff.outcome, "unknown");
+  assert.equal(handoff.target_files, undefined);
+  assert.equal(handoff.acceptance_checks, undefined);
+  assert.equal(handoff.slots.verified_route, false);
 });
 
 test("@aionis/claude-code PostCompact records handoff", async () => {

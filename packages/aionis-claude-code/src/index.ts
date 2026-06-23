@@ -70,6 +70,21 @@ export type AionisHookClient = Pick<AionisClient, "health"> & {
   execution: Pick<AionisClient["execution"], "guideForRole" | "observeStep" | "handoff">;
 };
 
+type AionisClaudeCodeSessionLedger = {
+  contract_version: "aionis_claude_code_session_ledger_v1";
+  session_id: string;
+  root_hash: string;
+  root: string;
+  updated_at: string;
+  edited_files: string[];
+  written_files: string[];
+  touched_files: string[];
+  successful_commands: string[];
+  failed_commands: string[];
+  latest_successful_validation_command?: string;
+  tool_event_count: number;
+};
+
 export const DEFAULT_AIONIS_BASE_URL = "http://127.0.0.1:3001";
 export const DEFAULT_PACKAGE_SPEC = "@aionis/claude-code@latest";
 export const DEFAULT_MCP_PACKAGE_SPEC = "@aionis/mcp@latest";
@@ -786,6 +801,139 @@ function targetFilesFromTool(toolName: string | undefined, toolInput: unknown): 
   return Array.from(new Set(candidates));
 }
 
+function commandFromTool(toolName: string | undefined, toolInput: unknown): string | undefined {
+  if (toolName !== "Bash" || !isRecord(toolInput)) return undefined;
+  const command = toolInput.command;
+  return typeof command === "string" && command.trim() ? truncate(command, 800) : undefined;
+}
+
+function looksLikeValidationCommand(command: string): boolean {
+  return /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|check|lint|typecheck)\b/i.test(command)
+    || /\b(?:node\s+--test|pytest|cargo\s+test|go\s+test|mvn\s+test|gradle\s+test|jest|vitest|make\s+test)\b/i.test(command);
+}
+
+function uniquePush(values: string[], value: string): string[] {
+  const next = value.trim();
+  if (!next || values.includes(next)) return values;
+  return [...values, next];
+}
+
+function sessionLedgerPath(root: string, input: AionisHookInput): string {
+  const sessionId = input.session_id || "session";
+  const rootHash = crypto.createHash("sha256").update(`${root}:${sessionId}`).digest("hex").slice(0, 20);
+  return path.join(os.tmpdir(), "aionis-claude-code-sessions", `${rootHash}.json`);
+}
+
+function emptySessionLedger(root: string, input: AionisHookInput): AionisClaudeCodeSessionLedger {
+  const sessionId = input.session_id || "session";
+  const rootHash = crypto.createHash("sha256").update(`${root}:${sessionId}`).digest("hex").slice(0, 20);
+  return {
+    contract_version: "aionis_claude_code_session_ledger_v1",
+    session_id: sessionId,
+    root_hash: rootHash,
+    root,
+    updated_at: new Date().toISOString(),
+    edited_files: [],
+    written_files: [],
+    touched_files: [],
+    successful_commands: [],
+    failed_commands: [],
+    tool_event_count: 0,
+  };
+}
+
+function readSessionLedger(root: string, input: AionisHookInput): AionisClaudeCodeSessionLedger {
+  const file = sessionLedgerPath(root, input);
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+    if (!isRecord(parsed) || parsed.contract_version !== "aionis_claude_code_session_ledger_v1") {
+      return emptySessionLedger(root, input);
+    }
+    const base = emptySessionLedger(root, input);
+    return {
+      ...base,
+      updated_at: typeof parsed.updated_at === "string" ? parsed.updated_at : base.updated_at,
+      edited_files: stringArray(parsed.edited_files),
+      written_files: stringArray(parsed.written_files),
+      touched_files: stringArray(parsed.touched_files),
+      successful_commands: stringArray(parsed.successful_commands),
+      failed_commands: stringArray(parsed.failed_commands),
+      latest_successful_validation_command:
+        typeof parsed.latest_successful_validation_command === "string" ? parsed.latest_successful_validation_command : undefined,
+      tool_event_count: Number.isFinite(parsed.tool_event_count) ? Number(parsed.tool_event_count) : 0,
+    };
+  } catch {
+    return emptySessionLedger(root, input);
+  }
+}
+
+function writeSessionLedger(root: string, input: AionisHookInput, ledger: AionisClaudeCodeSessionLedger): void {
+  const file = sessionLedgerPath(root, input);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify({ ...ledger, updated_at: new Date().toISOString() }, null, 2)}\n`);
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())));
+}
+
+function recordToolUseInLedger(root: string, input: AionisHookInput, failed: boolean): AionisClaudeCodeSessionLedger {
+  const ledger = readSessionLedger(root, input);
+  const targetFiles = targetFilesFromTool(input.tool_name, input.tool_input);
+  let editedFiles = ledger.edited_files;
+  let writtenFiles = ledger.written_files;
+  let touchedFiles = ledger.touched_files;
+  if (input.tool_name === "Edit") {
+    for (const file of targetFiles) editedFiles = uniquePush(editedFiles, file);
+  }
+  if (input.tool_name === "Write") {
+    for (const file of targetFiles) writtenFiles = uniquePush(writtenFiles, file);
+  }
+  for (const file of targetFiles) touchedFiles = uniquePush(touchedFiles, file);
+
+  const command = commandFromTool(input.tool_name, input.tool_input);
+  let successfulCommands = ledger.successful_commands;
+  let failedCommands = ledger.failed_commands;
+  let latestValidation = ledger.latest_successful_validation_command;
+  if (command) {
+    if (failed) {
+      failedCommands = uniquePush(failedCommands, command);
+    } else {
+      successfulCommands = uniquePush(successfulCommands, command);
+      if (looksLikeValidationCommand(command)) latestValidation = command;
+    }
+  }
+
+  const next: AionisClaudeCodeSessionLedger = {
+    ...ledger,
+    edited_files: editedFiles,
+    written_files: writtenFiles,
+    touched_files: touchedFiles,
+    successful_commands: successfulCommands,
+    failed_commands: failedCommands,
+    latest_successful_validation_command: latestValidation,
+    tool_event_count: ledger.tool_event_count + 1,
+  };
+  writeSessionLedger(root, input, next);
+  return next;
+}
+
+function verifiedSessionHandoffText(ledger: AionisClaudeCodeSessionLedger, reason: string | undefined): string {
+  const targetFiles = ledger.touched_files.length > 0 ? ledger.touched_files.join(", ") : "the edited files";
+  const validation = ledger.latest_successful_validation_command ?? "the final validation command";
+  const failed = ledger.failed_commands.length > 0
+    ? ` Failed commands are prior evidence only, not continuation routes: ${ledger.failed_commands.slice(0, 3).join(" | ")}.`
+    : "";
+  return [
+    `Claude Code session ended: ${reason ?? "unknown"}.`,
+    `Verified continuation route: continue work through ${targetFiles}.`,
+    `Acceptance check passed: ${validation}.`,
+    "Use the edited files as the active implementation surface for future continuation.",
+    failed,
+  ].join(" ").trim();
+}
+
 function toolSummary(input: AionisHookInput): string {
   const toolName = input.tool_name ?? "tool";
   if (isRecord(input.tool_input)) {
@@ -796,8 +944,8 @@ function toolSummary(input: AionisHookInput): string {
   return `${toolName}: ${textFromUnknown(input.tool_input, 600)}`;
 }
 
-function taskSignature(root: string, eventName: string | undefined): string {
-  return `claude-code:${slugifyScopePart(directoryBasename(root))}:${eventName ?? "event"}`;
+function taskSignature(root: string, _eventName: string | undefined): string {
+  return `claude-code:${slugifyScopePart(directoryBasename(root))}:workspace`;
 }
 
 function runId(input: AionisHookInput): string {
@@ -917,6 +1065,7 @@ export async function handleAionisClaudeCodeHook(
 
   if (eventName === "PostToolUse" || eventName === "PostToolUseFailure") {
     const failed = eventName === "PostToolUseFailure";
+    recordToolUseInLedger(root, input, failed);
     await hookClient.execution.observeStep({
       tenant_id: options.tenant_id,
       scope,
@@ -986,6 +1135,12 @@ export async function handleAionisClaudeCodeHook(
   }
 
   if (eventName === "SessionEnd") {
+    const ledger = readSessionLedger(root, input);
+    const verifiedTargetFiles = ledger.touched_files;
+    const hasVerifiedRoute = verifiedTargetFiles.length > 0 && !!ledger.latest_successful_validation_command;
+    const handoffText = hasVerifiedRoute
+      ? verifiedSessionHandoffText(ledger, input.reason)
+      : `Claude Code session ended: ${input.reason ?? "unknown"}. Use prior Aionis records for continuation.`;
     await hookClient.execution.handoff({
       tenant_id: options.tenant_id,
       scope,
@@ -994,14 +1149,54 @@ export async function handleAionisClaudeCodeHook(
       memory_lane: "private",
       run_id: runId(input),
       task_signature: taskSignature(root, eventName),
-      title: "Claude Code session ended",
-      summary: `Claude Code session ended: ${input.reason ?? "unknown"}.`,
-      handoff_text: `Claude Code session ended: ${input.reason ?? "unknown"}. Use prior Aionis records for continuation.`,
-      outcome: "unknown",
+      title: hasVerifiedRoute ? "Claude Code verified session handoff" : "Claude Code session ended",
+      summary: hasVerifiedRoute
+        ? `Claude Code completed a verified implementation route. ${ledger.latest_successful_validation_command} passed.`
+        : `Claude Code session ended: ${input.reason ?? "unknown"}.`,
+      handoff_text: handoffText,
+      outcome: hasVerifiedRoute ? "succeeded" : "unknown",
       handoff_kind: "task_handoff",
+      target_files: hasVerifiedRoute ? verifiedTargetFiles : undefined,
+      acceptance_checks: hasVerifiedRoute && ledger.latest_successful_validation_command
+        ? [`${ledger.latest_successful_validation_command} passed`]
+        : undefined,
+      next_action: hasVerifiedRoute
+        ? `Continue through the verified Claude Code route in ${verifiedTargetFiles.join(", ")}.`
+        : undefined,
+      evidence: hasVerifiedRoute
+        ? [
+          {
+            kind: "edited_files",
+            value: ledger.edited_files,
+          },
+          {
+            kind: "written_files",
+            value: ledger.written_files,
+          },
+          {
+            kind: "successful_validation_command",
+            value: ledger.latest_successful_validation_command,
+          },
+          ...(ledger.failed_commands.length > 0
+            ? [{
+              kind: "failed_commands_counter_evidence",
+              value: ledger.failed_commands.slice(0, 3),
+            }]
+            : []),
+        ]
+        : undefined,
       slots: {
         hook_event_name: eventName,
         reason: input.reason,
+        session_ledger_version: ledger.contract_version,
+        session_ledger_tool_event_count: ledger.tool_event_count,
+        verified_route: hasVerifiedRoute,
+        edited_files: ledger.edited_files,
+        written_files: ledger.written_files,
+        touched_files: ledger.touched_files,
+        successful_commands: ledger.successful_commands,
+        failed_commands: ledger.failed_commands,
+        successful_validation_command: ledger.latest_successful_validation_command,
       },
     }, requestOptions(options, scope));
     return null;
