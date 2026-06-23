@@ -271,6 +271,43 @@ test("@aionis/claude-code PostToolUse records execution evidence", async () => {
   assert.match(input.task_signature, /:workspace$/);
 });
 
+test("@aionis/claude-code PostToolUse keeps Runtime execution summaries bounded", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-posttool-long-"));
+  await handleAionisClaudeCodeHook({
+    session_id: "session-long",
+    cwd: dir,
+    hook_event_name: "PostToolUse",
+    tool_name: "Edit",
+    tool_use_id: "tool-long",
+    tool_input: {
+      file_path: path.join(dir, "src/math.js"),
+      old_string: "  return left - right;",
+      new_string: "  return left + right;",
+    },
+    tool_response: {
+      filePath: path.join(dir, "src/math.js"),
+      structuredPatch: Array.from({ length: 24 }, (_, index) => ({
+        oldStart: index + 1,
+        oldLines: 5,
+        newStart: index + 1,
+        newLines: 5,
+        lines: [
+          " export function add(left, right) {",
+          "-  return left - right;",
+          "+  return left + right;",
+          " }",
+        ],
+      })),
+    },
+  }, baseOptions({ repo_root: dir }), fakeClient(calls));
+
+  const input = calls[0].input as { summary: string };
+  assert.ok(input.summary.length <= 360);
+  assert.match(input.summary, /Edit:/);
+  assert.match(input.summary, /completed/);
+});
+
 test("@aionis/claude-code SessionEnd promotes verified edited files into handoff", async () => {
   const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-verified-session-"));

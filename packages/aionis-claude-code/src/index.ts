@@ -950,6 +950,13 @@ function toolSummary(input: AionisHookInput): string {
   return `${toolName}: ${textFromUnknown(input.tool_input, 600)}`;
 }
 
+function toolObservationSummary(input: AionisHookInput, failed: boolean): string {
+  const action = truncate(toolSummary(input), 180);
+  const response = truncate(textFromUnknown(input.tool_response, 240), 140);
+  const status = failed ? "failed" : "completed";
+  return truncate(`${action} ${status}.${response ? ` Response excerpt: ${response}` : ""}`, 360);
+}
+
 function taskSignature(root: string, _eventName: string | undefined): string {
   return `claude-code:${slugifyScopePart(directoryBasename(root))}:workspace`;
 }
@@ -1081,9 +1088,7 @@ export async function handleAionisClaudeCodeHook(
       run_id: runId(input),
       task_signature: taskSignature(root, eventName),
       title: `Claude Code ${input.tool_name ?? "tool"} ${failed ? "failed" : "completed"}`,
-      summary: failed
-        ? `${toolSummary(input)} failed. Response: ${textFromUnknown(input.tool_response, 700)}`
-        : `${toolSummary(input)} completed. Response: ${textFromUnknown(input.tool_response, 700)}`,
+      summary: toolObservationSummary(input, failed),
       outcome: failed ? "failed" : "succeeded",
       target_files: targetFilesFromTool(input.tool_name, input.tool_input),
       tool_set: input.tool_name ? [input.tool_name] : undefined,

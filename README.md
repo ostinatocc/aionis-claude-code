@@ -32,11 +32,13 @@ Then in Claude Code:
 The plugin defaults to `http://127.0.0.1:3101`, matching
 `@aionis/create --with-claude-code`.
 
-Version `0.2.8` and newer records a verified session handoff only when Claude
+Version `0.2.10` and newer records a verified session handoff only when Claude
 Code changed files and a validation command passed. The handoff includes active
 target files, acceptance checks, the successful validation command, and failed
 commands as counter-evidence, so the next Claude Code session can continue the
 validated route through Aionis guide context without generic session-end noise.
+Tool observation summaries are bounded before they are sent to Runtime so large
+patch payloads do not break the execution-memory write contract.
 
 ## What It Adds
 

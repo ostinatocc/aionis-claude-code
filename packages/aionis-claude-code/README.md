@@ -37,10 +37,12 @@ Hooks call Aionis through the SDK:
   validation passed; otherwise it skips writing execution memory to avoid
   generic session-end noise.
 
-Version `0.2.8` and newer includes active target files, acceptance checks, the
+Version `0.2.10` and newer includes active target files, acceptance checks, the
 successful validation command, active-continuation slots, and failed commands as
 counter-evidence in verified handoffs. Aionis Runtime can compile that handoff
-into active execution context for the next Claude Code session.
+into active execution context for the next Claude Code session. Tool observation
+summaries are bounded before Runtime write so large patch payloads do not break
+the execution-memory contract.
 
 MCP remains available for explicit tools such as `aionis_context`,
 `aionis_record_step`, `aionis_flight_recorder`, and `aionis_snapshot`.
