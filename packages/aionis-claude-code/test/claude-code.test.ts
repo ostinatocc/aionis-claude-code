@@ -310,19 +310,73 @@ test("@aionis/claude-code SessionEnd promotes verified edited files into handoff
   assert.equal(calls.at(-1)?.method, "handoff");
   const handoff = calls.at(-1)?.input as {
     outcome: string;
+    confidence: number;
     target_files: string[];
     acceptance_checks: string[];
     next_action: string;
+    continuation_hint: string;
     handoff_text: string;
-    slots: { verified_route: boolean; successful_validation_command: string };
+    evidence: Array<{ kind: string; value: unknown }>;
+    slots: {
+      verified_route: boolean;
+      active_execution_state: boolean;
+      active_continuation_handoff: boolean;
+      source_kind: string;
+      prompt_surface_preference: string;
+      route_status: string;
+      active_target_files: string[];
+      successful_validation_command: string;
+      summary_kind: string;
+      execution_kind: string;
+      contract_trust: string;
+      execution_native_v1: {
+        summary_kind: string;
+        execution_kind: string;
+        contract_trust: string;
+        target_files: string[];
+        acceptance_checks: string[];
+        next_action: string;
+      };
+      execution_contract_v1: {
+        schema_version: string;
+        contract_trust: string;
+        target_files: string[];
+        next_action: string;
+        outcome: { acceptance_checks: string[] };
+      };
+    };
   };
   assert.equal(handoff.outcome, "succeeded");
+  assert.equal(handoff.confidence, 0.95);
   assert.deepEqual(handoff.target_files, [path.join(dir, "src/total.js")]);
   assert.deepEqual(handoff.acceptance_checks, ["npm test passed"]);
   assert.match(handoff.next_action, /verified Claude Code route/);
+  assert.match(handoff.continuation_hint, /Active continuation route/);
   assert.match(handoff.handoff_text, /Verified continuation route/);
+  assert.match(handoff.handoff_text, /active continuation handoff/);
+  assert.ok(handoff.evidence.some((entry) => entry.kind === "active_target_files"));
   assert.equal(handoff.slots.verified_route, true);
+  assert.equal(handoff.slots.active_execution_state, true);
+  assert.equal(handoff.slots.active_continuation_handoff, true);
+  assert.equal(handoff.slots.source_kind, "verified_claude_code_session_handoff");
+  assert.equal(handoff.slots.prompt_surface_preference, "use_now");
+  assert.equal(handoff.slots.route_status, "accepted_after_validation");
+  assert.deepEqual(handoff.slots.active_target_files, [path.join(dir, "src/total.js")]);
   assert.equal(handoff.slots.successful_validation_command, "npm test");
+  assert.equal(handoff.slots.summary_kind, "handoff");
+  assert.equal(handoff.slots.execution_kind, "active_continuation_handoff");
+  assert.equal(handoff.slots.contract_trust, "advisory");
+  assert.equal(handoff.slots.execution_native_v1.summary_kind, "handoff");
+  assert.equal(handoff.slots.execution_native_v1.execution_kind, "active_continuation_handoff");
+  assert.equal(handoff.slots.execution_native_v1.contract_trust, "advisory");
+  assert.deepEqual(handoff.slots.execution_native_v1.target_files, [path.join(dir, "src/total.js")]);
+  assert.deepEqual(handoff.slots.execution_native_v1.acceptance_checks, ["npm test passed"]);
+  assert.match(handoff.slots.execution_native_v1.next_action, /verified Claude Code route/);
+  assert.equal(handoff.slots.execution_contract_v1.schema_version, "execution_contract_v1");
+  assert.equal(handoff.slots.execution_contract_v1.contract_trust, "advisory");
+  assert.deepEqual(handoff.slots.execution_contract_v1.target_files, [path.join(dir, "src/total.js")]);
+  assert.match(handoff.slots.execution_contract_v1.next_action, /verified Claude Code route/);
+  assert.deepEqual(handoff.slots.execution_contract_v1.outcome.acceptance_checks, ["npm test passed"]);
 });
 
 test("@aionis/claude-code SessionEnd keeps failed commands as evidence after later validation passes", async () => {
@@ -381,7 +435,7 @@ test("@aionis/claude-code SessionEnd keeps failed commands as evidence after lat
   assert.match(handoff.handoff_text, /Failed commands are prior evidence only, not continuation routes/);
 });
 
-test("@aionis/claude-code SessionEnd remains unknown without a verified edit route", async () => {
+test("@aionis/claude-code SessionEnd does not write execution handoff without a verified edit route", async () => {
   const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-unverified-session-"));
   const options = baseOptions({ repo_root: dir });
@@ -403,17 +457,7 @@ test("@aionis/claude-code SessionEnd remains unknown without a verified edit rou
     reason: "other",
   }, options, fakeClient(calls));
 
-  assert.equal(calls.at(-1)?.method, "handoff");
-  const handoff = calls.at(-1)?.input as {
-    outcome: string;
-    target_files?: string[];
-    acceptance_checks?: string[];
-    slots: { verified_route: boolean };
-  };
-  assert.equal(handoff.outcome, "unknown");
-  assert.equal(handoff.target_files, undefined);
-  assert.equal(handoff.acceptance_checks, undefined);
-  assert.equal(handoff.slots.verified_route, false);
+  assert.equal(calls.some((call) => call.method === "handoff"), false);
 });
 
 test("@aionis/claude-code PostCompact records handoff", async () => {

@@ -878,6 +878,12 @@ function stringArray(value: unknown): string[] {
   return Array.from(new Set(value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())));
 }
 
+function compactStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values
+    .map((value) => typeof value === "string" ? value.trim() : "")
+    .filter((value) => value.length > 0)));
+}
+
 function recordToolUseInLedger(root: string, input: AionisHookInput, failed: boolean): AionisClaudeCodeSessionLedger {
   const ledger = readSessionLedger(root, input);
   const targetFiles = targetFilesFromTool(input.tool_name, input.tool_input);
@@ -929,7 +935,7 @@ function verifiedSessionHandoffText(ledger: AionisClaudeCodeSessionLedger, reaso
     `Claude Code session ended: ${reason ?? "unknown"}.`,
     `Verified continuation route: continue work through ${targetFiles}.`,
     `Acceptance check passed: ${validation}.`,
-    "Use the edited files as the active implementation surface for future continuation.",
+    "This is an active continuation handoff. Use the edited files as the active implementation surface for future continuation.",
     failed,
   ].join(" ").trim();
 }
@@ -1138,9 +1144,8 @@ export async function handleAionisClaudeCodeHook(
     const ledger = readSessionLedger(root, input);
     const verifiedTargetFiles = ledger.touched_files;
     const hasVerifiedRoute = verifiedTargetFiles.length > 0 && !!ledger.latest_successful_validation_command;
-    const handoffText = hasVerifiedRoute
-      ? verifiedSessionHandoffText(ledger, input.reason)
-      : `Claude Code session ended: ${input.reason ?? "unknown"}. Use prior Aionis records for continuation.`;
+    if (!hasVerifiedRoute) return null;
+    const handoffText = verifiedSessionHandoffText(ledger, input.reason);
     await hookClient.execution.handoff({
       tenant_id: options.tenant_id,
       scope,
@@ -1149,54 +1154,110 @@ export async function handleAionisClaudeCodeHook(
       memory_lane: "private",
       run_id: runId(input),
       task_signature: taskSignature(root, eventName),
-      title: hasVerifiedRoute ? "Claude Code verified session handoff" : "Claude Code session ended",
-      summary: hasVerifiedRoute
-        ? `Claude Code completed a verified implementation route. ${ledger.latest_successful_validation_command} passed.`
-        : `Claude Code session ended: ${input.reason ?? "unknown"}.`,
+      title: "Claude Code verified session handoff",
+      summary: `Claude Code completed a verified implementation route. ${ledger.latest_successful_validation_command} passed.`,
       handoff_text: handoffText,
-      outcome: hasVerifiedRoute ? "succeeded" : "unknown",
+      outcome: "succeeded",
       handoff_kind: "task_handoff",
-      target_files: hasVerifiedRoute ? verifiedTargetFiles : undefined,
-      acceptance_checks: hasVerifiedRoute && ledger.latest_successful_validation_command
-        ? [`${ledger.latest_successful_validation_command} passed`]
-        : undefined,
-      next_action: hasVerifiedRoute
-        ? `Continue through the verified Claude Code route in ${verifiedTargetFiles.join(", ")}.`
-        : undefined,
-      evidence: hasVerifiedRoute
-        ? [
-          {
-            kind: "edited_files",
-            value: ledger.edited_files,
-          },
-          {
-            kind: "written_files",
-            value: ledger.written_files,
-          },
-          {
-            kind: "successful_validation_command",
-            value: ledger.latest_successful_validation_command,
-          },
-          ...(ledger.failed_commands.length > 0
-            ? [{
-              kind: "failed_commands_counter_evidence",
-              value: ledger.failed_commands.slice(0, 3),
-            }]
-            : []),
-        ]
-        : undefined,
+      target_files: verifiedTargetFiles,
+      acceptance_checks: [`${ledger.latest_successful_validation_command} passed`],
+      next_action: `Continue through the verified Claude Code route in ${verifiedTargetFiles.join(", ")}.`,
+      continuation_hint: `Active continuation route: use ${verifiedTargetFiles.join(", ")} and keep ${ledger.latest_successful_validation_command} as the acceptance check.`,
+      evidence: [
+        {
+          kind: "edited_files",
+          value: ledger.edited_files,
+        },
+        {
+          kind: "written_files",
+          value: ledger.written_files,
+        },
+        {
+          kind: "active_target_files",
+          value: verifiedTargetFiles,
+        },
+        {
+          kind: "successful_validation_command",
+          value: ledger.latest_successful_validation_command,
+        },
+        ...(ledger.failed_commands.length > 0
+          ? [{
+            kind: "failed_commands_counter_evidence",
+            value: ledger.failed_commands.slice(0, 3),
+          }]
+          : []),
+      ],
+      confidence: 0.95,
       slots: {
         hook_event_name: eventName,
         reason: input.reason,
+        summary_kind: "handoff",
+        execution_kind: "active_continuation_handoff",
+        contract_trust: "advisory",
         session_ledger_version: ledger.contract_version,
         session_ledger_tool_event_count: ledger.tool_event_count,
-        verified_route: hasVerifiedRoute,
+        verified_route: true,
+        active_execution_state: true,
+        active_continuation_handoff: true,
+        source_kind: "verified_claude_code_session_handoff",
+        prompt_surface_preference: "use_now",
+        route_status: "accepted_after_validation",
         edited_files: ledger.edited_files,
         written_files: ledger.written_files,
         touched_files: ledger.touched_files,
+        active_target_files: verifiedTargetFiles,
         successful_commands: ledger.successful_commands,
         failed_commands: ledger.failed_commands,
         successful_validation_command: ledger.latest_successful_validation_command,
+        execution_native_v1: {
+          summary_kind: "handoff",
+          execution_kind: "active_continuation_handoff",
+          contract_trust: "advisory",
+          target_files: verifiedTargetFiles,
+          next_action: `Continue through the verified Claude Code route in ${verifiedTargetFiles.join(", ")}.`,
+          workflow_steps: compactStrings([
+            ...ledger.edited_files.map((file) => `Continue edited file: ${file}`),
+            ...ledger.written_files.map((file) => `Continue written file: ${file}`),
+            `Validate with: ${ledger.latest_successful_validation_command}`,
+          ]).slice(0, 8),
+          acceptance_checks: [`${ledger.latest_successful_validation_command} passed`],
+          actor_role: "worker",
+          source_agent_id: "claude-code",
+        },
+        execution_contract_v1: {
+          schema_version: "execution_contract_v1",
+          contract_trust: "advisory",
+          task_family: null,
+          task_signature: taskSignature(root, eventName),
+          workflow_signature: null,
+          policy_memory_id: null,
+          selected_tool: null,
+          file_path: verifiedTargetFiles[0] ?? null,
+          target_files: verifiedTargetFiles,
+          next_action: `Continue through the verified Claude Code route in ${verifiedTargetFiles.join(", ")}.`,
+          workflow_steps: compactStrings([
+            ...ledger.edited_files.map((file) => `Continue edited file: ${file}`),
+            ...ledger.written_files.map((file) => `Continue written file: ${file}`),
+            `Validate with: ${ledger.latest_successful_validation_command}`,
+          ]).slice(0, 8),
+          pattern_hints: [],
+          service_lifecycle_constraints: [],
+          outcome: {
+            acceptance_checks: [`${ledger.latest_successful_validation_command} passed`],
+            success_invariants: [],
+            dependency_requirements: [],
+            environment_assumptions: [],
+            must_hold_after_exit: [],
+            external_visibility_requirements: [],
+          },
+          provenance: {
+            source_kind: "handoff_store",
+            source_summary_version: null,
+            source_anchor: null,
+            evidence_refs: compactStrings([ledger.latest_successful_validation_command]),
+            notes: ["Generated by Claude Code hook after file change and validation pass."],
+          },
+        },
       },
     }, requestOptions(options, scope));
     return null;

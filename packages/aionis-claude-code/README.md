@@ -33,13 +33,14 @@ Hooks call Aionis through the SDK:
 - `PostToolUse` / `PostToolUseFailure`: records Bash/Edit/Write execution
   evidence.
 - `PostCompact`: records the compacted session summary as handoff evidence.
-- `SessionEnd`: records a verified handoff when files changed and validation
-  passed; otherwise records a neutral session boundary.
+- `SessionEnd`: records a verified handoff only when files changed and
+  validation passed; otherwise it skips writing execution memory to avoid
+  generic session-end noise.
 
-Version `0.2.7` and newer includes target files, acceptance checks, the
-successful validation command, and failed commands as counter-evidence in
-verified handoffs. Aionis Runtime can compile that handoff into active
-execution context for the next Claude Code session.
+Version `0.2.8` and newer includes active target files, acceptance checks, the
+successful validation command, active-continuation slots, and failed commands as
+counter-evidence in verified handoffs. Aionis Runtime can compile that handoff
+into active execution context for the next Claude Code session.
 
 MCP remains available for explicit tools such as `aionis_context`,
 `aionis_record_step`, `aionis_flight_recorder`, and `aionis_snapshot`.
