@@ -26,6 +26,14 @@ test("Claude Code plugin exposes Runtime settings through userConfig", () => {
   assert.equal(plugin.userConfig.max_prompt_chars.default, 8000);
 });
 
+test("Claude Code plugin version matches the published hook package", () => {
+  const plugin = readJson("claude-plugins/aionis/.claude-plugin/plugin.json");
+  const packageJson = readJson("packages/aionis-claude-code/package.json");
+
+  assert.equal(packageJson.name, "@aionis/claude-code");
+  assert.equal(plugin.version, packageJson.version);
+});
+
 test("Claude Code plugin MCP uses shared user-level workspace identity", () => {
   const mcp = readJson("claude-plugins/aionis/.mcp.json");
   const server = mcp.mcpServers.aionis;
