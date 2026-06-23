@@ -141,6 +141,8 @@ test("@aionis/claude-code writes idempotent Claude Code hook settings", () => {
   assert.equal(hooks.SessionStart.length, 1);
   assert.equal(hooks.PostToolUse.length, 1);
   assert.equal(hooks.PostCompact.length, 1);
+  const sessionEndHook = (hooks.SessionEnd[0] as { hooks: Array<{ timeout?: number }> }).hooks[0];
+  assert.equal(sessionEndHook.timeout, 30);
   const aionisHook = (hooks.SessionStart[0] as { hooks: Array<{ command: string; args?: string[] }> }).hooks[0];
   assert.match(aionisHook.command, /^npx '-y' '@aionis\/claude-code@latest' 'hook'/);
   assert.match(aionisHook.command, /'--workspace-id-store' 'project'/);
@@ -344,7 +346,15 @@ test("@aionis/claude-code SessionEnd promotes verified edited files into handoff
     reason: "end_turn",
   }, options, fakeClient(calls));
 
+  await handleAionisClaudeCodeHook({
+    session_id: "session-verified",
+    cwd: dir,
+    hook_event_name: "SessionEnd",
+    reason: "prompt_input_exit",
+  }, options, fakeClient(calls));
+
   assert.equal(calls.at(-1)?.method, "handoff");
+  assert.equal(calls.filter((call) => call.method === "handoff").length, 1);
   const handoff = calls.at(-1)?.input as {
     outcome: string;
     confidence: number;

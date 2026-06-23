@@ -83,6 +83,8 @@ type AionisClaudeCodeSessionLedger = {
   failed_commands: string[];
   latest_successful_validation_command?: string;
   tool_event_count: number;
+  handoff_signature?: string;
+  handoff_recorded_at?: string;
 };
 
 export const DEFAULT_AIONIS_BASE_URL = "http://127.0.0.1:3001";
@@ -540,7 +542,7 @@ export function nextClaudeCodeSettings(
     ["PostToolUseFailure", "Bash|Edit|Write", 10],
     ["PreCompact", "manual|auto", 10],
     ["PostCompact", "manual|auto", 10],
-    ["SessionEnd", "clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other", 10],
+    ["SessionEnd", "clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other", 30],
   ];
 
   for (const [event, matcher, timeout] of desired) {
@@ -839,6 +841,8 @@ function emptySessionLedger(root: string, input: AionisHookInput): AionisClaudeC
     successful_commands: [],
     failed_commands: [],
     tool_event_count: 0,
+    handoff_signature: undefined,
+    handoff_recorded_at: undefined,
   };
 }
 
@@ -861,6 +865,8 @@ function readSessionLedger(root: string, input: AionisHookInput): AionisClaudeCo
       latest_successful_validation_command:
         typeof parsed.latest_successful_validation_command === "string" ? parsed.latest_successful_validation_command : undefined,
       tool_event_count: Number.isFinite(parsed.tool_event_count) ? Number(parsed.tool_event_count) : 0,
+      handoff_signature: typeof parsed.handoff_signature === "string" ? parsed.handoff_signature : undefined,
+      handoff_recorded_at: typeof parsed.handoff_recorded_at === "string" ? parsed.handoff_recorded_at : undefined,
     };
   } catch {
     return emptySessionLedger(root, input);
@@ -938,6 +944,16 @@ function verifiedSessionHandoffText(ledger: AionisClaudeCodeSessionLedger, reaso
     "This is an active continuation handoff. Use the edited files as the active implementation surface for future continuation.",
     failed,
   ].join(" ").trim();
+}
+
+function sessionHandoffSignature(ledger: AionisClaudeCodeSessionLedger): string {
+  return crypto.createHash("sha256").update(JSON.stringify({
+    touched_files: ledger.touched_files,
+    edited_files: ledger.edited_files,
+    written_files: ledger.written_files,
+    latest_successful_validation_command: ledger.latest_successful_validation_command ?? null,
+    tool_event_count: ledger.tool_event_count,
+  })).digest("hex").slice(0, 24);
 }
 
 function toolSummary(input: AionisHookInput): string {
@@ -1150,6 +1166,8 @@ export async function handleAionisClaudeCodeHook(
     const verifiedTargetFiles = ledger.touched_files;
     const hasVerifiedRoute = verifiedTargetFiles.length > 0 && !!ledger.latest_successful_validation_command;
     if (!hasVerifiedRoute) return null;
+    const handoffSignature = sessionHandoffSignature(ledger);
+    if (ledger.handoff_signature === handoffSignature) return null;
     const handoffText = verifiedSessionHandoffText(ledger, input.reason);
     await hookClient.execution.handoff({
       tenant_id: options.tenant_id,
@@ -1265,6 +1283,11 @@ export async function handleAionisClaudeCodeHook(
         },
       },
     }, requestOptions(options, scope));
+    writeSessionLedger(root, input, {
+      ...ledger,
+      handoff_signature: handoffSignature,
+      handoff_recorded_at: new Date().toISOString(),
+    });
     return null;
   }
 
@@ -1279,6 +1302,15 @@ async function readStdinJson(): Promise<AionisHookInput> {
   const parsed = JSON.parse(raw) as unknown;
   if (!isRecord(parsed)) throw new Error("Claude Code hook input must be a JSON object");
   return parsed as AionisHookInput;
+}
+
+async function writeStdout(value: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(value, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
 }
 
 export async function statusAionisClaudeCode(options: AionisClaudeCodeOptions, cwd = process.cwd()): Promise<{
@@ -1349,10 +1381,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
     const input = await readStdinJson();
     const output = await handleAionisClaudeCodeHook(input, options);
-    if (output) process.stdout.write(`${output}\n`);
+    if (output) await writeStdout(`${output}\n`);
+    if (options.command === "hook") {
+      process.exit(0);
+    }
   } catch (err) {
     if (process.env.AIONIS_CLAUDE_CODE_DEBUG === "1") {
       process.stderr.write(`Aionis Claude Code hook skipped: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    if (options.command === "hook") {
+      process.exit(0);
     }
   }
 }
