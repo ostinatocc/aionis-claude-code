@@ -32,12 +32,19 @@ Then in Claude Code:
 The plugin defaults to `http://127.0.0.1:3101`, matching
 `@aionis/create --with-claude-code`.
 
+Version `0.2.7` and newer records a verified session handoff when Claude Code
+changed files and a validation command passed. The handoff includes target
+files, acceptance checks, the successful validation command, and failed commands
+as counter-evidence, so the next Claude Code session can continue the validated
+route through Aionis guide context.
+
 ## What It Adds
 
 - User-level Claude Code plugin install.
 - Aionis MCP server named `aionis`.
 - Lifecycle hooks for `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
   `PostToolUseFailure`, compaction, and session end.
+- Verified session handoff records for successful file-changing sessions.
 - Slash commands: `/aionis:onboard`, `/aionis:doctor`, `/aionis:status`.
 - Stable workspace identity storage outside individual repos.
 
