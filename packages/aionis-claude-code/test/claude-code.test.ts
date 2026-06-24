@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  aionisHookDebugErrorMessage,
   deriveAionisClaudeCodeScope,
   handleAionisClaudeCodeHook,
   installAionisClaudeCode,
@@ -93,6 +94,25 @@ test("@aionis/claude-code parses install options", () => {
   assert.equal(parsed.scope_from, "git");
   assert.equal(parsed.mcp_name, "aionis");
   assert.equal(parsed.skip_mcp, true);
+});
+
+test("@aionis/claude-code debug hook errors include Runtime response body", () => {
+  const error = Object.assign(new Error("Aionis request failed: 400 /v1/observe"), {
+    status: 400,
+    path: "/v1/observe",
+    response: {
+      error: {
+        code: "observe_requires_memory_or_handoff",
+        message: "observe requires memory input, handoff payload, or explicit claims",
+      },
+    },
+  });
+
+  const message = aionisHookDebugErrorMessage(error);
+
+  assert.match(message, /Aionis Claude Code hook skipped: Aionis request failed: 400 \/v1\/observe/);
+  assert.match(message, /Aionis Runtime response:/);
+  assert.match(message, /observe_requires_memory_or_handoff/);
 });
 
 test("@aionis/claude-code onboard defaults to user-level hooks and MCP", () => {

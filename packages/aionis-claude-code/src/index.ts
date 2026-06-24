@@ -810,6 +810,16 @@ function textFromUnknown(value: unknown, max = 1000): string {
   }
 }
 
+export function aionisHookDebugErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const response = isRecord(err) && Object.hasOwn(err, "response") ? err.response : undefined;
+  const responseText = response === undefined ? "" : textFromUnknown(response, 1200);
+  return [
+    `Aionis Claude Code hook skipped: ${message}`,
+    responseText ? `Aionis Runtime response: ${responseText}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 function targetFilesFromTool(toolName: string | undefined, toolInput: unknown): string[] {
   if (!isRecord(toolInput)) return [];
   const candidates: string[] = [];
@@ -1650,7 +1660,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
   } catch (err) {
     if (process.env.AIONIS_CLAUDE_CODE_DEBUG === "1") {
-      process.stderr.write(`Aionis Claude Code hook skipped: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`${aionisHookDebugErrorMessage(err)}\n`);
     }
     if (options.command === "hook") {
       process.exit(0);
