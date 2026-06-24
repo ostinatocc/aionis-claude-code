@@ -1,6 +1,6 @@
 {
   "name": "aionis",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "Execution memory, Memory Firewall, and Agent Flight Recorder for Claude Code.",
   "author": {
     "name": "Aionis"

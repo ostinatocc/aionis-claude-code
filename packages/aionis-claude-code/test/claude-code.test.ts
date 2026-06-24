@@ -166,7 +166,7 @@ test("@aionis/claude-code writes idempotent Claude Code hook settings", () => {
   const sessionEndHook = (hooks.SessionEnd[0] as { hooks: Array<{ timeout?: number }> }).hooks[0];
   assert.equal(sessionEndHook.timeout, 30);
   const aionisHook = (hooks.SessionStart[0] as { hooks: Array<{ command: string; args?: string[] }> }).hooks[0];
-  assert.match(aionisHook.command, /^npx '-y' '@aionis\/claude-code@latest' 'hook'/);
+  assert.match(aionisHook.command, /^npm 'exec' '--yes' '--package' '@aionis\/claude-code@latest' '--' 'aionis-claude-code' 'hook'/);
   assert.match(aionisHook.command, /'--workspace-id-store' 'project'/);
   assert.equal(aionisHook.args, undefined);
 });
@@ -256,6 +256,14 @@ test("@aionis/claude-code dry-run install does not write files", async () => {
   assert.equal(fs.existsSync(result.settings_file), false);
   assert.equal(fs.existsSync(result.instructions_file), false);
   assert.ok(plan.mcp_command?.includes("@aionis/mcp@latest"));
+  assert.deepEqual(
+    plan.mcp_command?.slice(
+      plan.mcp_command.indexOf("--") + 1,
+      plan.mcp_command.indexOf("--") + 7,
+    ),
+    ["npm", "exec", "--yes", "--package", "@aionis/mcp@latest", "--"],
+  );
+  assert.equal(plan.mcp_command?.[plan.mcp_command.indexOf("--") + 7], "aionis-mcp");
   assert.deepEqual(
     plan.mcp_command?.slice(
       plan.mcp_command.indexOf("--workspace-id-store"),

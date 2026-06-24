@@ -509,7 +509,7 @@ function hookCommand(options: AionisClaudeCodeOptions): string {
   const fileEntrypoint = filePackageEntrypoint(options.package_spec);
   const prefix = fileEntrypoint
     ? ["node", fileEntrypoint]
-    : ["npx", "-y", options.package_spec];
+    : ["npm", "exec", "--yes", "--package", options.package_spec, "--", "aionis-claude-code"];
   const args = [
     "hook",
     "--base-url",
@@ -618,9 +618,13 @@ export function installPlan(options: AionisClaudeCodeOptions, cwd = process.cwd(
     options.claude_scope,
     options.mcp_name,
     "--",
-    "npx",
-    "-y",
+    "npm",
+    "exec",
+    "--yes",
+    "--package",
     options.mcp_package_spec,
+    "--",
+    "aionis-mcp",
     "--base-url",
     options.baseUrl,
     "--scope-from",
