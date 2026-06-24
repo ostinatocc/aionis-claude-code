@@ -38,6 +38,15 @@ guide context, subagent/team completion events write advisory handoffs, and
 Agent tool returns refresh parent context so the next Claude Code agent can see
 governed state without reading raw history.
 
+## Verified Flow
+
+The v0.2.14 baseline was tested in an isolated real Claude Code project flow:
+one session used a verifier subagent to find a failing test and fix it, then a
+new session recovered the verified route from Aionis and confirmed the same
+state without editing files.
+
+See [docs/claude-code-real-project-flow-v0.2.14.md](docs/claude-code-real-project-flow-v0.2.14.md).
+
 ## What It Adds
 
 - User-level Claude Code plugin install.
