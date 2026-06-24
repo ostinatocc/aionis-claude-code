@@ -180,6 +180,14 @@ test("@aionis/claude-code global install shortcut targets user settings", () => 
   const settings = nextClaudeCodeSettings({}, options);
   const hooks = settings.hooks as Record<string, Array<{ hooks: Array<{ command: string; args?: string[] }> }>>;
   assert.match(hooks.UserPromptSubmit[0].hooks[0].command, /'--workspace-id-store' 'user'/);
+  const plan = installPlan({ ...options, skip_mcp: false }, process.cwd());
+  assert.deepEqual(
+    plan.mcp_command?.slice(
+      plan.mcp_command.indexOf("--workspace-id-store"),
+      plan.mcp_command.indexOf("--workspace-id-store") + 2,
+    ),
+    ["--workspace-id-store", "user"],
+  );
 });
 
 test("@aionis/claude-code uses direct node hook command for file package installs", () => {
@@ -248,6 +256,13 @@ test("@aionis/claude-code dry-run install does not write files", async () => {
   assert.equal(fs.existsSync(result.settings_file), false);
   assert.equal(fs.existsSync(result.instructions_file), false);
   assert.ok(plan.mcp_command?.includes("@aionis/mcp@latest"));
+  assert.deepEqual(
+    plan.mcp_command?.slice(
+      plan.mcp_command.indexOf("--workspace-id-store"),
+      plan.mcp_command.indexOf("--workspace-id-store") + 2,
+    ),
+    ["--workspace-id-store", "project"],
+  );
 });
 
 test("@aionis/claude-code UserPromptSubmit injects compiled Aionis context", async () => {

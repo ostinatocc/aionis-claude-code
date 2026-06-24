@@ -625,6 +625,8 @@ export function installPlan(options: AionisClaudeCodeOptions, cwd = process.cwd(
     options.baseUrl,
     "--scope-from",
     options.scope_from,
+    "--workspace-id-store",
+    options.workspace_identity_store,
     "--mode",
     options.mode ?? "none",
   ];
