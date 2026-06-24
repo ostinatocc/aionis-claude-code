@@ -3,6 +3,7 @@ import {
   compileExecutionAgentContext,
   createAionisClient,
   type AionisClient,
+  type AionisExecutionAgentRole,
   type AionisGuideMode,
   type AionisJsonObject,
   type AionisRequestOptions,
@@ -50,6 +51,7 @@ export type AionisClaudeCodeWorkspaceIdentity = {
 
 export type AionisHookInput = {
   session_id?: string;
+  transcript_path?: string;
   cwd?: string;
   hook_event_name?: string;
   prompt?: string;
@@ -62,8 +64,23 @@ export type AionisHookInput = {
   custom_instructions?: string;
   compact_summary?: string;
   reason?: string;
+  agent_id?: string;
   agent_type?: string;
+  agent_transcript_path?: string;
+  last_assistant_message?: string;
+  task_id?: string;
+  task_subject?: string;
+  task_description?: string;
+  teammate_name?: string;
+  team_name?: string;
   model?: string;
+};
+
+type ClaudeCodeExecutionIdentity = {
+  agent_id: string;
+  role: AionisExecutionAgentRole;
+  team_id: string;
+  memory_lane: "shared";
 };
 
 export type AionisHookClient = Pick<AionisClient, "health"> & {
@@ -538,8 +555,12 @@ export function nextClaudeCodeSettings(
   const desired: Array<[string, string, number]> = [
     ["SessionStart", "startup|resume|clear|compact", 10],
     ["UserPromptSubmit", "", 25],
-    ["PostToolUse", "Bash|Edit|Write", 10],
-    ["PostToolUseFailure", "Bash|Edit|Write", 10],
+    ["PostToolUse", "Agent|Bash|Edit|Write", 15],
+    ["PostToolUseFailure", "Agent|Bash|Edit|Write", 15],
+    ["SubagentStart", "", 25],
+    ["SubagentStop", "", 15],
+    ["TaskCreated", "", 10],
+    ["TaskCompleted", "", 15],
     ["PreCompact", "manual|auto", 10],
     ["PostCompact", "manual|auto", 10],
     ["SessionEnd", "clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other", 30],
@@ -977,8 +998,75 @@ function taskSignature(root: string, _eventName: string | undefined): string {
   return `claude-code:${slugifyScopePart(directoryBasename(root))}:workspace`;
 }
 
+function taskSignatureForHook(root: string, input: AionisHookInput, eventName: string | undefined): string {
+  const base = taskSignature(root, eventName);
+  const taskId = typeof input.task_id === "string" && input.task_id.trim() ? input.task_id.trim() : "";
+  if (taskId) return `${base}:task:${slugifyScopePart(taskId)}`;
+  const agentType = typeof input.agent_type === "string" && input.agent_type.trim() ? input.agent_type.trim() : "";
+  if (agentType && (eventName === "SubagentStart" || eventName === "SubagentStop")) {
+    return `${base}:subagent:${slugifyScopePart(agentType)}`;
+  }
+  return base;
+}
+
 function runId(input: AionisHookInput): string {
   return `claude:${input.session_id || "session"}`;
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function roleFromText(value: string | undefined, fallback: AionisExecutionAgentRole): AionisExecutionAgentRole {
+  const text = (value ?? "").toLowerCase();
+  if (/\b(?:plan|planner|architect|design|explore|research|investigate)\b/.test(text)) return "planner";
+  if (/\b(?:verify|verifier|test|qa|check|review-test)\b/.test(text)) return "verifier";
+  if (/\b(?:review|reviewer|audit|critic|security)\b/.test(text)) return "reviewer";
+  if (/\b(?:work|worker|implement|coder|code|fix|edit|build)\b/.test(text)) return "worker";
+  return fallback;
+}
+
+function claudeCodeTeamId(root: string, scope: string | undefined, input: AionisHookInput): string {
+  const teamName = stringField(input.team_name);
+  if (teamName) return `claude-code-team:${slugifyScopePart(teamName)}`;
+  const scopeKey = scope ?? root;
+  return `claude-code-workspace:${slugifyScopePart(directoryBasename(root))}:${shortHash(scopeKey)}`;
+}
+
+function claudeCodeIdentity(
+  root: string,
+  scope: string | undefined,
+  input: AionisHookInput,
+  eventName: string | undefined,
+): ClaudeCodeExecutionIdentity {
+  const team_id = claudeCodeTeamId(root, scope, input);
+  if (eventName === "SubagentStart" || eventName === "SubagentStop") {
+    const agentId = stringField(input.agent_id) ?? `${input.session_id ?? "session"}:${input.agent_type ?? "subagent"}`;
+    const agentType = stringField(input.agent_type) ?? "subagent";
+    return {
+      agent_id: `claude-code:subagent:${slugifyScopePart(agentType)}:${shortHash(agentId)}`,
+      role: roleFromText(agentType, "worker"),
+      team_id,
+      memory_lane: "shared",
+    };
+  }
+  if (eventName === "TaskCreated" || eventName === "TaskCompleted") {
+    const teammate = stringField(input.teammate_name);
+    const subject = stringField(input.task_subject);
+    const agentName = teammate ?? (eventName === "TaskCreated" ? "team-lead" : "teammate");
+    return {
+      agent_id: `claude-code:${slugifyScopePart(agentName)}`,
+      role: roleFromText(`${teammate ?? ""} ${subject ?? ""}`, eventName === "TaskCreated" ? "planner" : "worker"),
+      team_id,
+      memory_lane: "shared",
+    };
+  }
+  return {
+    agent_id: "claude-code",
+    role: "worker",
+    team_id,
+    memory_lane: "shared",
+  };
 }
 
 function requestOptions(options: AionisClaudeCodeOptions, scope: string | undefined): AionisRequestOptions {
@@ -1015,13 +1103,20 @@ async function guideAdditionalContext(
   options: AionisClaudeCodeOptions,
   root: string,
   scope: string | undefined,
+  identity: ClaudeCodeExecutionIdentity,
 ): Promise<string> {
-  const prompt = input.prompt?.trim() || `Claude Code ${input.hook_event_name ?? "session"} in ${directoryBasename(root)}`;
+  const eventName = input.hook_event_name ?? "session";
+  const prompt = input.prompt?.trim()
+    || input.task_subject?.trim()
+    || input.task_description?.trim()
+    || input.agent_type?.trim()
+    || `Claude Code ${eventName} in ${directoryBasename(root)}`;
   const guide = await client.execution.guideForRole({
-    agent_id: "claude-code",
-    role: "worker",
+    agent_id: identity.agent_id,
+    team_id: identity.team_id,
+    role: identity.role,
     run_id: runId(input),
-    task_signature: taskSignature(root, input.hook_event_name),
+    task_signature: taskSignatureForHook(root, input, input.hook_event_name),
     query_text: prompt,
     limit: 8,
     mode: options.mode ?? undefined,
@@ -1033,6 +1128,12 @@ async function guideAdditionalContext(
       cwd: root,
       source: input.source,
       model: input.model,
+      claude_agent_id: input.agent_id,
+      claude_agent_type: input.agent_type,
+      claude_task_id: input.task_id,
+      claude_task_subject: input.task_subject,
+      claude_teammate_name: input.teammate_name,
+      claude_team_name: input.team_name,
     },
     tenant_id: options.tenant_id,
     scope,
@@ -1041,7 +1142,7 @@ async function guideAdditionalContext(
     guide,
     task: {
       run_id: runId(input),
-      task_signature: taskSignature(root, input.hook_event_name),
+      task_signature: taskSignatureForHook(root, input, input.hook_event_name),
       query_text: prompt,
     },
     budget_profile: "compact",
@@ -1050,6 +1151,7 @@ async function guideAdditionalContext(
   return [
     "AIONIS_EXECUTION_MEMORY_CONTEXT",
     "This context was injected before Claude Code processed the user prompt.",
+    `Aionis role: ${identity.role}; agent: ${identity.agent_id}; team: ${identity.team_id}.`,
     "Follow it as the current memory contract: use_now/CURRENT_ACTIVE_PATH are actionable; inspect_before_use is reference-only; do_not_use is blocked.",
     compiled.agent_prompt,
   ].join("\n\n");
@@ -1075,6 +1177,7 @@ export async function handleAionisClaudeCodeHook(
     scope,
   });
   const eventName = input.hook_event_name ?? "Unknown";
+  const identity = claudeCodeIdentity(root, scope, input, eventName);
 
   if (eventName === "SessionStart") {
     let healthOk = false;
@@ -1088,8 +1191,38 @@ export async function handleAionisClaudeCodeHook(
   }
 
   if (eventName === "UserPromptSubmit") {
-    const context = await guideAdditionalContext(hookClient, input, options, root, scope);
+    const context = await guideAdditionalContext(hookClient, input, options, root, scope, identity);
     return hookJson("UserPromptSubmit", context);
+  }
+
+  if (eventName === "SubagentStart") {
+    const context = await guideAdditionalContext(hookClient, input, options, root, scope, identity);
+    await hookClient.execution.observeStep({
+      tenant_id: options.tenant_id,
+      scope,
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
+      run_id: runId(input),
+      task_signature: taskSignatureForHook(root, input, eventName),
+      title: `Claude Code subagent started: ${input.agent_type ?? identity.role}`,
+      summary: truncate([
+        `Subagent started with role ${identity.role}.`,
+        input.agent_type ? `Claude agent type: ${input.agent_type}.` : "",
+        input.prompt ? `Delegation prompt: ${input.prompt}` : "",
+      ].filter(Boolean).join(" "), 500),
+      outcome: "unknown",
+      confidence: 0.7,
+      slots: {
+        hook_event_name: eventName,
+        claude_agent_id: input.agent_id,
+        claude_agent_type: input.agent_type,
+        claude_agent_transcript_path: input.agent_transcript_path,
+        aionis_team_id: identity.team_id,
+      },
+    }, requestOptions(options, scope));
+    return hookJson("SubagentStart", context);
   }
 
   if (eventName === "PostToolUse" || eventName === "PostToolUseFailure") {
@@ -1098,11 +1231,12 @@ export async function handleAionisClaudeCodeHook(
     await hookClient.execution.observeStep({
       tenant_id: options.tenant_id,
       scope,
-      agent_id: "claude-code",
-      role: "worker",
-      memory_lane: "private",
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
       run_id: runId(input),
-      task_signature: taskSignature(root, eventName),
+      task_signature: taskSignatureForHook(root, input, eventName),
       title: `Claude Code ${input.tool_name ?? "tool"} ${failed ? "failed" : "completed"}`,
       summary: toolObservationSummary(input, failed),
       outcome: failed ? "failed" : "succeeded",
@@ -1115,6 +1249,132 @@ export async function handleAionisClaudeCodeHook(
         tool_name: input.tool_name,
       },
     }, requestOptions(options, scope));
+    if (!failed && input.tool_name === "Agent") {
+      const context = await guideAdditionalContext(hookClient, {
+        ...input,
+        prompt: `Integrate Claude Code Agent tool result: ${textFromUnknown(input.tool_response, 1200)}`,
+      }, options, root, scope, identity);
+      return hookJson("PostToolUse", context);
+    }
+    return null;
+  }
+
+  if (eventName === "SubagentStop") {
+    const resultText = input.last_assistant_message
+      ?? textFromUnknown({ task_subject: input.task_subject, task_description: input.task_description }, 1200)
+      ?? "Claude Code subagent stopped.";
+    await hookClient.execution.handoff({
+      tenant_id: options.tenant_id,
+      scope,
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
+      run_id: runId(input),
+      task_signature: taskSignatureForHook(root, input, eventName),
+      title: `Claude Code subagent result: ${input.agent_type ?? identity.role}`,
+      summary: truncate(resultText, 1200),
+      handoff_text: truncate(resultText, 2400),
+      outcome: "succeeded",
+      handoff_kind: "task_handoff",
+      continuation_hint: "Use this subagent result as team evidence; keep Aionis admission decisions authoritative before direct action.",
+      confidence: 0.78,
+      slots: {
+        hook_event_name: eventName,
+        summary_kind: "handoff",
+        execution_kind: "subagent_result_handoff",
+        contract_trust: "advisory",
+        source_kind: "claude_code_subagent_stop",
+        claude_agent_id: input.agent_id,
+        claude_agent_type: input.agent_type,
+        claude_agent_transcript_path: input.agent_transcript_path,
+        aionis_team_id: identity.team_id,
+        execution_native_v1: {
+          summary_kind: "handoff",
+          execution_kind: "subagent_result_handoff",
+          contract_trust: "advisory",
+          actor_role: identity.role,
+          source_agent_id: identity.agent_id,
+        },
+      },
+    }, requestOptions(options, scope));
+    return null;
+  }
+
+  if (eventName === "TaskCreated") {
+    const subject = input.task_subject ?? input.task_id ?? "Claude Code team task";
+    await hookClient.execution.observeStep({
+      tenant_id: options.tenant_id,
+      scope,
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
+      run_id: runId(input),
+      task_signature: taskSignatureForHook(root, input, eventName),
+      title: `Claude Code team task created: ${truncate(subject, 120)}`,
+      summary: truncate([
+        input.task_subject ? `Task: ${input.task_subject}.` : "",
+        input.task_description ? `Description: ${input.task_description}.` : "",
+        input.teammate_name ? `Assigned to: ${input.teammate_name}.` : "",
+      ].filter(Boolean).join(" ") || "Claude Code team task created.", 700),
+      outcome: "unknown",
+      confidence: 0.72,
+      slots: {
+        hook_event_name: eventName,
+        claude_task_id: input.task_id,
+        claude_task_subject: input.task_subject,
+        claude_task_description: input.task_description,
+        claude_teammate_name: input.teammate_name,
+        claude_team_name: input.team_name,
+        aionis_team_id: identity.team_id,
+      },
+    }, requestOptions(options, scope));
+    return null;
+  }
+
+  if (eventName === "TaskCompleted") {
+    const subject = input.task_subject ?? input.task_id ?? "Claude Code team task";
+    const resultText = input.last_assistant_message
+      ?? input.task_description
+      ?? `Claude Code team task completed: ${subject}.`;
+    await hookClient.execution.handoff({
+      tenant_id: options.tenant_id,
+      scope,
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
+      run_id: runId(input),
+      task_signature: taskSignatureForHook(root, input, eventName),
+      title: `Claude Code team task completed: ${truncate(subject, 120)}`,
+      summary: truncate(resultText, 1200),
+      handoff_text: truncate(resultText, 2400),
+      outcome: "succeeded",
+      handoff_kind: "task_handoff",
+      continuation_hint: "Use this completed team task as shared execution evidence for future Claude Code agents in this workspace.",
+      confidence: 0.82,
+      slots: {
+        hook_event_name: eventName,
+        summary_kind: "handoff",
+        execution_kind: "team_task_completion_handoff",
+        contract_trust: "advisory",
+        source_kind: "claude_code_task_completed",
+        claude_task_id: input.task_id,
+        claude_task_subject: input.task_subject,
+        claude_task_description: input.task_description,
+        claude_teammate_name: input.teammate_name,
+        claude_team_name: input.team_name,
+        aionis_team_id: identity.team_id,
+        execution_native_v1: {
+          summary_kind: "handoff",
+          execution_kind: "team_task_completion_handoff",
+          contract_trust: "advisory",
+          actor_role: identity.role,
+          source_agent_id: identity.agent_id,
+        },
+      },
+    }, requestOptions(options, scope));
     return null;
   }
 
@@ -1122,11 +1382,12 @@ export async function handleAionisClaudeCodeHook(
     await hookClient.execution.observeStep({
       tenant_id: options.tenant_id,
       scope,
-      agent_id: "claude-code",
-      role: "worker",
-      memory_lane: "private",
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
       run_id: runId(input),
-      task_signature: taskSignature(root, eventName),
+      task_signature: taskSignatureForHook(root, input, eventName),
       title: "Claude Code compact starting",
       summary: `Claude Code is about to compact context (${input.trigger ?? "unknown"}). ${input.custom_instructions ? `Instructions: ${truncate(input.custom_instructions, 500)}` : ""}`.trim(),
       outcome: "unknown",
@@ -1142,11 +1403,12 @@ export async function handleAionisClaudeCodeHook(
     await hookClient.execution.handoff({
       tenant_id: options.tenant_id,
       scope,
-      agent_id: "claude-code",
-      role: "worker",
-      memory_lane: "private",
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
       run_id: runId(input),
-      task_signature: taskSignature(root, eventName),
+      task_signature: taskSignatureForHook(root, input, eventName),
       title: "Claude Code compacted session handoff",
       summary: input.compact_summary ? truncate(input.compact_summary, 1500) : "Claude Code compacted the session.",
       handoff_text: input.compact_summary ? truncate(input.compact_summary, 3000) : "Claude Code compacted the session.",
@@ -1172,11 +1434,12 @@ export async function handleAionisClaudeCodeHook(
     await hookClient.execution.handoff({
       tenant_id: options.tenant_id,
       scope,
-      agent_id: "claude-code",
-      role: "worker",
-      memory_lane: "private",
+      agent_id: identity.agent_id,
+      team_id: identity.team_id,
+      role: identity.role,
+      memory_lane: identity.memory_lane,
       run_id: runId(input),
-      task_signature: taskSignature(root, eventName),
+      task_signature: taskSignatureForHook(root, input, eventName),
       title: "Claude Code verified session handoff",
       summary: `Claude Code completed a verified implementation route. ${ledger.latest_successful_validation_command} passed.`,
       handoff_text: handoffText,
@@ -1244,8 +1507,8 @@ export async function handleAionisClaudeCodeHook(
             `Validate with: ${ledger.latest_successful_validation_command}`,
           ]).slice(0, 8),
           acceptance_checks: [`${ledger.latest_successful_validation_command} passed`],
-          actor_role: "worker",
-          source_agent_id: "claude-code",
+          actor_role: identity.role,
+          source_agent_id: identity.agent_id,
         },
         execution_contract_v1: {
           schema_version: "execution_contract_v1",

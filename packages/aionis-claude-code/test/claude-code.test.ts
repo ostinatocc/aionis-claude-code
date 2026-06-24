@@ -141,6 +141,8 @@ test("@aionis/claude-code writes idempotent Claude Code hook settings", () => {
   assert.equal(hooks.SessionStart.length, 1);
   assert.equal(hooks.PostToolUse.length, 1);
   assert.equal(hooks.PostCompact.length, 1);
+  assert.equal(hooks.SubagentStart.length, 1);
+  assert.equal(hooks.TaskCompleted.length, 1);
   const sessionEndHook = (hooks.SessionEnd[0] as { hooks: Array<{ timeout?: number }> }).hooks[0];
   assert.equal(sessionEndHook.timeout, 30);
   const aionisHook = (hooks.SessionStart[0] as { hooks: Array<{ command: string; args?: string[] }> }).hooks[0];
@@ -247,6 +249,68 @@ test("@aionis/claude-code UserPromptSubmit injects compiled Aionis context", asy
   assert.match(parsed.hookSpecificOutput.additionalContext, /Do not reuse/);
 });
 
+test("@aionis/claude-code SubagentStart injects role-aware shared team context", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-subagent-start-"));
+  const output = await handleAionisClaudeCodeHook({
+    session_id: "session-subagent",
+    cwd: dir,
+    hook_event_name: "SubagentStart",
+    agent_id: "agent-123",
+    agent_type: "Explore",
+    prompt: "Inspect the migration plan and summarize the active route.",
+  }, baseOptions({ repo_root: dir }), fakeClient(calls));
+
+  assert.equal(calls[0].method, "guideForRole");
+  const guide = calls[0].input as { agent_id: string; role: string; team_id: string; task_signature: string };
+  assert.match(guide.agent_id, /^claude-code:subagent:Explore:/);
+  assert.equal(guide.role, "planner");
+  assert.match(guide.team_id, /^claude-code-workspace:/);
+  assert.match(guide.task_signature, /:subagent:Explore$/);
+  assert.equal(calls[1].method, "observeStep");
+  const observed = calls[1].input as { memory_lane: string; role: string; team_id: string; slots: { claude_agent_type?: string } };
+  assert.equal(observed.memory_lane, "shared");
+  assert.equal(observed.role, "planner");
+  assert.equal(observed.team_id, guide.team_id);
+  assert.equal(observed.slots.claude_agent_type, "Explore");
+  assert.ok(output);
+  const parsed = JSON.parse(output ?? "{}") as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "SubagentStart");
+  assert.match(parsed.hookSpecificOutput.additionalContext, /Aionis role: planner/);
+});
+
+test("@aionis/claude-code SubagentStop records advisory shared handoff", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-subagent-stop-"));
+  const output = await handleAionisClaudeCodeHook({
+    session_id: "session-subagent-stop",
+    cwd: dir,
+    hook_event_name: "SubagentStop",
+    agent_id: "agent-456",
+    agent_type: "Verifier",
+    last_assistant_message: "Checked the acceptance criteria and found the route valid.",
+  }, baseOptions({ repo_root: dir }), fakeClient(calls));
+
+  assert.equal(output, null);
+  assert.equal(calls[0].method, "handoff");
+  const handoff = calls[0].input as {
+    agent_id: string;
+    role: string;
+    memory_lane: string;
+    team_id: string;
+    handoff_text: string;
+    slots: { execution_kind: string; source_kind: string; execution_native_v1: { actor_role: string } };
+  };
+  assert.match(handoff.agent_id, /^claude-code:subagent:Verifier:/);
+  assert.equal(handoff.role, "verifier");
+  assert.equal(handoff.memory_lane, "shared");
+  assert.match(handoff.team_id, /^claude-code-workspace:/);
+  assert.match(handoff.handoff_text, /route valid/);
+  assert.equal(handoff.slots.execution_kind, "subagent_result_handoff");
+  assert.equal(handoff.slots.source_kind, "claude_code_subagent_stop");
+  assert.equal(handoff.slots.execution_native_v1.actor_role, "verifier");
+});
+
 test("@aionis/claude-code PostToolUse records execution evidence", async () => {
   const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-posttool-"));
@@ -271,6 +335,34 @@ test("@aionis/claude-code PostToolUse records execution evidence", async () => {
   assert.deepEqual(input.target_files, ["/tmp/project/src/app.ts"]);
   assert.deepEqual(input.tool_set, ["Edit"]);
   assert.match(input.task_signature, /:workspace$/);
+});
+
+test("@aionis/claude-code Agent tool result records evidence and refreshes parent context", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-agent-tool-"));
+  const output = await handleAionisClaudeCodeHook({
+    session_id: "session-agent-tool",
+    cwd: dir,
+    hook_event_name: "PostToolUse",
+    tool_name: "Agent",
+    tool_use_id: "agent-tool-1",
+    tool_input: { prompt: "Ask verifier to inspect the active route." },
+    tool_response: { result: "Verifier says the route is valid." },
+  }, baseOptions({ repo_root: dir }), fakeClient(calls));
+
+  assert.equal(calls[0].method, "observeStep");
+  assert.equal(calls[1].method, "guideForRole");
+  const observed = calls[0].input as { tool_set: string[]; memory_lane: string; team_id: string };
+  assert.deepEqual(observed.tool_set, ["Agent"]);
+  assert.equal(observed.memory_lane, "shared");
+  const guide = calls[1].input as { team_id: string; role: string; query_text: string };
+  assert.equal(guide.team_id, observed.team_id);
+  assert.equal(guide.role, "worker");
+  assert.match(guide.query_text, /Verifier says the route is valid/);
+  assert.ok(output);
+  const parsed = JSON.parse(output ?? "{}") as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "PostToolUse");
+  assert.match(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_MEMORY_CONTEXT/);
 });
 
 test("@aionis/claude-code PostToolUse keeps Runtime execution summaries bounded", async () => {
@@ -424,6 +516,60 @@ test("@aionis/claude-code SessionEnd promotes verified edited files into handoff
   assert.deepEqual(handoff.slots.execution_contract_v1.target_files, [path.join(dir, "src/total.js")]);
   assert.match(handoff.slots.execution_contract_v1.next_action, /verified Claude Code route/);
   assert.deepEqual(handoff.slots.execution_contract_v1.outcome.acceptance_checks, ["npm test passed"]);
+});
+
+test("@aionis/claude-code Agent Team task events write shared task evidence", async () => {
+  const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-team-task-"));
+  const options = baseOptions({ repo_root: dir });
+
+  await handleAionisClaudeCodeHook({
+    session_id: "team-session",
+    cwd: dir,
+    hook_event_name: "TaskCreated",
+    task_id: "task-1",
+    task_subject: "Review checkout adapter",
+    task_description: "Check that the adapter respects the verified route.",
+    teammate_name: "reviewer",
+    team_name: "checkout-team",
+  }, options, fakeClient(calls));
+
+  await handleAionisClaudeCodeHook({
+    session_id: "team-session",
+    cwd: dir,
+    hook_event_name: "TaskCompleted",
+    task_id: "task-1",
+    task_subject: "Review checkout adapter",
+    task_description: "Check that the adapter respects the verified route.",
+    teammate_name: "reviewer",
+    team_name: "checkout-team",
+    last_assistant_message: "Reviewer completed the task and accepted the route.",
+  }, options, fakeClient(calls));
+
+  assert.equal(calls[0].method, "observeStep");
+  const created = calls[0].input as { agent_id: string; role: string; team_id: string; memory_lane: string; task_signature: string };
+  assert.equal(created.agent_id, "claude-code:reviewer");
+  assert.equal(created.role, "reviewer");
+  assert.equal(created.team_id, "claude-code-team:checkout-team");
+  assert.equal(created.memory_lane, "shared");
+  assert.match(created.task_signature, /:task:task-1$/);
+
+  assert.equal(calls[1].method, "handoff");
+  const completed = calls[1].input as {
+    agent_id: string;
+    role: string;
+    team_id: string;
+    memory_lane: string;
+    handoff_text: string;
+    slots: { execution_kind: string; source_kind: string };
+  };
+  assert.equal(completed.agent_id, "claude-code:reviewer");
+  assert.equal(completed.role, "reviewer");
+  assert.equal(completed.team_id, "claude-code-team:checkout-team");
+  assert.equal(completed.memory_lane, "shared");
+  assert.match(completed.handoff_text, /accepted the route/);
+  assert.equal(completed.slots.execution_kind, "team_task_completion_handoff");
+  assert.equal(completed.slots.source_kind, "claude_code_task_completed");
 });
 
 test("@aionis/claude-code SessionEnd keeps failed commands as evidence after later validation passes", async () => {

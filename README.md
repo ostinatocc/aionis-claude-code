@@ -3,8 +3,8 @@
 Claude Code plugin, MCP bridge wiring, and lifecycle hooks for Aionis execution
 memory.
 
-Use this repo when you want Claude Code to receive governed execution context
-before prompts, record Bash/Edit/Write outcomes after tool use, and expose
+Use this repo when you want Claude Code sessions, subagents, and Agent Team
+tasks to receive governed execution context, record tool outcomes, and expose
 Aionis MCP tools such as context, handoff, snapshot, measure, and Flight
 Recorder.
 
@@ -32,21 +32,22 @@ Then in Claude Code:
 The plugin defaults to `http://127.0.0.1:3101`, matching
 `@aionis/create --with-claude-code`.
 
-Version `0.2.10` and newer records a verified session handoff only when Claude
-Code changed files and a validation command passed. The handoff includes active
-target files, acceptance checks, the successful validation command, and failed
-commands as counter-evidence, so the next Claude Code session can continue the
-validated route through Aionis guide context without generic session-end noise.
-Tool observation summaries are bounded before they are sent to Runtime so large
-patch payloads do not break the execution-memory write contract.
+Version `0.2.13` and newer also maps Claude Code subagents and Agent Team tasks
+into Aionis shared execution memory. Subagent start events receive role-aware
+guide context, subagent/team completion events write advisory handoffs, and
+Agent tool returns refresh parent context so the next Claude Code agent can see
+governed state without reading raw history.
 
 ## What It Adds
 
 - User-level Claude Code plugin install.
 - Aionis MCP server named `aionis`.
 - Lifecycle hooks for `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
-  `PostToolUseFailure`, compaction, and session end.
+  `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `TaskCreated`,
+  `TaskCompleted`, compaction, and session end.
 - Verified session handoff records for successful file-changing sessions.
+- Shared execution memory across Claude Code subagents and Agent Teams using
+  Aionis `team_id`, derived `agent_id`, and role-aware guide calls.
 - Slash commands: `/aionis:onboard`, `/aionis:doctor`, `/aionis:status`.
 - Stable workspace identity storage outside individual repos.
 

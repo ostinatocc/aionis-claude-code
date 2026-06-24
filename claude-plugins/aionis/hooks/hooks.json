@@ -26,24 +26,68 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Edit|Write",
+        "matcher": "Agent|Bash|Edit|Write",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/aionis-hook.mjs\"",
-            "timeout": 30
+            "timeout": 15
           }
         ]
       }
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "Bash|Edit|Write",
+        "matcher": "Agent|Bash|Edit|Write",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/aionis-hook.mjs\"",
-            "timeout": 30
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/aionis-hook.mjs\"",
+            "timeout": 25
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/aionis-hook.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "TaskCreated": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/aionis-hook.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/aionis-hook.mjs\"",
+            "timeout": 15
           }
         ]
       }

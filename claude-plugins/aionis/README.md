@@ -2,7 +2,8 @@
 
 This plugin gives Claude Code Aionis execution memory through two paths:
 
-- Lifecycle hooks that inject governed context and record tool outcomes.
+- Lifecycle hooks that inject governed context and record tool, subagent, and
+  Agent Team outcomes.
 - MCP tools for explicit context, handoff, Memory Firewall, snapshots, and Flight Recorder.
 
 ## Install From This Marketplace
@@ -49,3 +50,21 @@ Runtime match out of the box.
 
 The plugin defaults to `AIONIS_SCOPE_FROM=workspace` and `AIONIS_WORKSPACE_ID_STORE=user`.
 That gives each project a stable Aionis scope without writing identity files into every repo.
+
+## Claude Code Multi-Agent Events
+
+The plugin records ordinary Claude Code sessions and Claude Code multi-agent
+surfaces into the same Aionis workspace memory:
+
+- `UserPromptSubmit` receives governed execution context before the main Claude
+  Code prompt.
+- `SubagentStart` receives role-aware context for the subagent.
+- `SubagentStop` writes the subagent result as shared advisory handoff evidence.
+- `TaskCreated` / `TaskCompleted` record Agent Team task boundaries and
+  teammate completion handoffs.
+- `PostToolUse` for the `Agent` tool records the delegated result and refreshes
+  parent context.
+
+Aionis does not orchestrate Claude Code agents. Claude Code still manages
+subagents and teams; Aionis supplies shared execution memory, admission
+decisions, handoff evidence, and Flight Recorder traces.
