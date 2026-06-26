@@ -32,18 +32,17 @@ Then in Claude Code:
 The plugin defaults to `http://127.0.0.1:3101`, matching
 `@aionis/create --with-claude-code`.
 
-Version `0.2.13` and newer also maps Claude Code subagents and Agent Team tasks
-into Aionis shared execution memory. Subagent start events receive role-aware
-guide context, subagent/team completion events write advisory handoffs, and
-Agent tool returns refresh parent context so the next Claude Code agent can see
-governed state without reading raw history.
+Version `0.3.0` maps Claude Code subagents and Agent Team tasks into Aionis
+shared execution memory. Subagent start events receive role-aware guide context,
+subagent/team completion events write advisory handoffs, and Agent tool returns
+refresh parent context so the next Claude Code agent can see governed state
+without reading raw history.
 
 ## Verified Flow
 
-The v0.2.14 baseline was tested in an isolated real Claude Code project flow:
-one session used a verifier subagent to find a failing test and fix it, then a
-new session recovered the verified route from Aionis and confirmed the same
-state without editing files.
+The v0.3.0 adapter keeps the isolated real-project flow: one session can use a
+verifier subagent, record validated execution evidence, and let a later session
+recover the governed route from Aionis without reading raw history.
 
 See [docs/claude-code-real-project-flow-v0.2.14.md](docs/claude-code-real-project-flow-v0.2.14.md).
 

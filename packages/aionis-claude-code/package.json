@@ -1,6 +1,6 @@
 {
   "name": "@aionis/claude-code",
-  "version": "0.2.17",
+  "version": "0.3.0",
   "description": "One-step Claude Code lifecycle integration for Aionis execution memory.",
   "license": "Apache-2.0",
   "homepage": "https://docs.aionis.work/integrations/claude-code",
@@ -26,7 +26,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@aionis/sdk": "^0.2.25"
+    "@aionis/sdk": "^0.3.0"
   },
   "publishConfig": {
     "access": "public"

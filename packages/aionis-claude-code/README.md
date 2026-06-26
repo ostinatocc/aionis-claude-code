@@ -42,12 +42,12 @@ Hooks call Aionis through the SDK:
   validation passed; otherwise it skips writing execution memory to avoid
   generic session-end noise.
 
-Version `0.2.13` and newer maps Claude Code subagents and Agent Team tasks into
-Aionis shared execution memory with stable workspace `team_id`, derived
-`agent_id`, and role-aware guide calls. Aionis Runtime can compile those
-handoffs into active execution context for future Claude Code agents in the same
-workspace. Tool observation summaries remain bounded before Runtime write so
-large patch payloads do not break the execution-memory contract.
+Version `0.3.0` maps Claude Code subagents and Agent Team tasks into Aionis
+shared execution memory with stable workspace `team_id`, derived `agent_id`,
+and role-aware guide calls. Aionis Runtime can compile those handoffs into
+active execution context for future Claude Code agents in the same workspace.
+Tool observation summaries remain bounded before Runtime write so large patch
+payloads do not break the execution-memory contract.
 
 MCP remains available for explicit tools such as `aionis_context`,
 `aionis_record_step`, `aionis_flight_recorder`, and `aionis_snapshot`.

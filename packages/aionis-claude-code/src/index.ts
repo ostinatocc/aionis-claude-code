@@ -592,7 +592,7 @@ Aionis is active for this workspace.
 - Treat use_now and CURRENT_ACTIVE_PATH as actionable.
 - Treat inspect_before_use as reference only.
 - Treat do_not_use / failed / stale / contested memory as blocked for direct action.
-- Preserve important decisions, failed branches, acceptance checks, and handoff state through Aionis tools when useful.
+- Preserve important decisions, execution boundaries, acceptance checks, validation evidence, and handoff state through Aionis tools when useful.
 `;
   if (!dryRun) {
     fs.mkdirSync(path.dirname(instructionsPathValue), { recursive: true });
