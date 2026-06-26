@@ -16,7 +16,7 @@ This repo is the Claude Code adapter layer only.
 Start an isolated local Aionis Runtime:
 
 ```bash
-npx @aionis/create@latest .aionis-runtime --with-claude-code
+npx aionis setup .aionis-runtime --with-claude-code
 cd .aionis-runtime
 npm run -s lite:start
 ```
@@ -30,7 +30,7 @@ Then in Claude Code:
 ```
 
 The plugin defaults to `http://127.0.0.1:3101`, matching
-`@aionis/create --with-claude-code`.
+`npx aionis setup --with-claude-code`.
 
 Version `0.3.0` maps Claude Code subagents and Agent Team tasks into Aionis
 shared execution memory. Subagent start events receive role-aware guide context,
