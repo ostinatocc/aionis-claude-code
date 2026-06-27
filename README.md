@@ -9,7 +9,7 @@ Aionis MCP tools such as context, handoff, snapshot, measure, and Flight
 Recorder.
 
 Runtime core lives in [ostinatocc/Aionis](https://github.com/ostinatocc/Aionis).
-This repo is the Claude Code adapter layer only.
+This repo publishes the Claude Code integration package.
 
 ## Install
 
@@ -59,9 +59,9 @@ See [docs/claude-code-real-project-flow-v0.2.14.md](docs/claude-code-real-projec
 - Slash commands: `/aionis:onboard`, `/aionis:doctor`, `/aionis:status`.
 - Stable workspace identity storage outside individual repos.
 
-## CLI Fallback
+## CLI Onboarding
 
-If you do not want to use Claude Code plugins:
+Use the CLI onboarding command for scripted setup:
 
 ```bash
 npx @aionis/claude-code@latest onboard --base-url http://127.0.0.1:3101
@@ -88,7 +88,7 @@ Local plugin testing:
 
 This repo publishes:
 
-- `@aionis/claude-code`: CLI fallback and hook implementation used by the
+- `@aionis/claude-code`: CLI onboarding and hook implementation used by the
   plugin wrapper scripts.
 
 The package depends on the public `@aionis/sdk` package and talks to Aionis

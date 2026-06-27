@@ -2,8 +2,9 @@
 
 Claude Code lifecycle integration for Aionis execution memory.
 
-Use this package when MCP-only is not enough and you want Claude Code sessions,
-subagents, and Agent Team tasks to pass through Aionis automatically.
+Use this package to bring Aionis governed execution context, evidence capture,
+handoff state, and feedback attribution into Claude Code sessions, subagents,
+and Agent Team tasks.
 
 Recommended Claude Code plugin setup:
 
@@ -17,7 +18,7 @@ The plugin loads user-level lifecycle hooks, an Aionis MCP server, and slash
 commands. After that, run `claude` from any project. Aionis derives a stable
 workspace scope per project without requiring manual project setup.
 
-CLI fallback:
+CLI onboarding:
 
 ```bash
 npx @aionis/claude-code@latest onboard --base-url http://127.0.0.1:3101
