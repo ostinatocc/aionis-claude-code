@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import {
-  compileExecutionAgentContext,
   createAionisClient,
   type AionisClient,
   type AionisExecutionAgentRole,
@@ -84,7 +83,7 @@ type ClaudeCodeExecutionIdentity = {
 };
 
 export type AionisHookClient = Pick<AionisClient, "health"> & {
-  execution: Pick<AionisClient["execution"], "guideForRole" | "observeStep" | "handoff">;
+  execution: Pick<AionisClient["execution"], "guideAgentContextForRole" | "observeStep" | "handoff">;
 };
 
 type AionisClaudeCodeSessionLedger = {
@@ -1127,7 +1126,7 @@ async function guideAdditionalContext(
     || input.task_description?.trim()
     || input.agent_type?.trim()
     || `Claude Code ${eventName} in ${directoryBasename(root)}`;
-  const guide = await client.execution.guideForRole({
+  const agentContext = await client.execution.guideAgentContextForRole({
     agent_id: identity.agent_id,
     team_id: identity.team_id,
     role: identity.role,
@@ -1153,9 +1152,7 @@ async function guideAdditionalContext(
     },
     tenant_id: options.tenant_id,
     scope,
-  }, requestOptions(options, scope));
-  const compiled = compileExecutionAgentContext({
-    guide,
+  }, requestOptions(options, scope), {
     task: {
       run_id: runId(input),
       task_signature: taskSignatureForHook(root, input, input.hook_event_name),
@@ -1169,7 +1166,7 @@ async function guideAdditionalContext(
     "This context was injected before Claude Code processed the user prompt.",
     `Aionis role: ${identity.role}; agent: ${identity.agent_id}; team: ${identity.team_id}.`,
     "Follow it as the current memory contract: use_now/CURRENT_ACTIVE_PATH are actionable; inspect_before_use is reference-only; do_not_use is blocked.",
-    compiled.agent_prompt,
+    agentContext.agent_prompt,
   ].join("\n\n");
 }
 

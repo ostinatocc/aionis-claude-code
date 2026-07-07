@@ -6,6 +6,10 @@ This plugin gives Claude Code Aionis execution memory through two paths:
   Agent Team outcomes.
 - MCP tools for explicit context, handoff, Memory Firewall, snapshots, and Flight Recorder.
 
+The injected prompt context is the SDK AgentContext
+`execution.guideAgentContextForRole().agent_prompt`; the plugin is a Claude Code
+transport for that contract, not a separate context surface.
+
 ## Install From This Marketplace
 
 From Claude Code:

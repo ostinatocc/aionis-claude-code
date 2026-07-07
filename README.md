@@ -8,6 +8,10 @@ tasks to receive governed execution context, record tool outcomes, and expose
 Aionis MCP tools such as context, handoff, snapshot, measure, and Flight
 Recorder.
 
+Claude Code prompt injection uses the public SDK AgentContext path
+`execution.guideAgentContextForRole().agent_prompt`. This repository is an
+integration transport, not a separate Aionis context compiler.
+
 Runtime core lives in [ostinatocc/Aionis](https://github.com/ostinatocc/Aionis).
 This repo publishes the Claude Code integration package.
 

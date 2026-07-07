@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { compileExecutionAgentContext } from "@aionis/sdk";
 import {
   aionisHookDebugErrorMessage,
   deriveAionisClaudeCodeScope,
@@ -44,9 +45,9 @@ function fakeClient(calls: Array<{ method: string; input?: unknown; options?: un
       return { ok: true };
     },
     execution: {
-      guideForRole: async (input, options) => {
-        calls.push({ method: "guideForRole", input, options });
-        return {
+      guideAgentContextForRole: async (input, options, contextOptions) => {
+        calls.push({ method: "guideAgentContextForRole", input, options });
+        const guide = {
           guide_trace_id: "guide-test",
           agent_context: {
             prompt_text: [
@@ -60,6 +61,22 @@ function fakeClient(calls: Array<{ method: string; input?: unknown; options?: un
             inspect_before_use_memory_ids: [],
             do_not_use_memory_ids: ["mem-failed"],
           },
+        };
+        const compiled = compileExecutionAgentContext({
+          guide,
+          ...(contextOptions ?? {}),
+        });
+        return {
+          contract_version: "aionis_sdk_agent_context_with_evidence_v1",
+          guide,
+          compiled_context: compiled,
+          agent_context: guide.agent_context,
+          agent_prompt: compiled.agent_prompt,
+          resolved_evidence: [],
+          unresolved_memory_ids: [],
+          evidence_char_count: 0,
+          prompt_char_count: compiled.agent_prompt.length,
+          guide_trace_id: guide.guide_trace_id,
         };
       },
       observeStep: async (input, options) => {
@@ -283,7 +300,7 @@ test("@aionis/claude-code UserPromptSubmit injects compiled Aionis context", asy
     prompt: "Continue the checkout migration.",
   }, baseOptions({ repo_root: dir }), fakeClient(calls));
 
-  assert.equal(calls[0].method, "guideForRole");
+  assert.equal(calls[0].method, "guideAgentContextForRole");
   assert.match((calls[0].input as { task_signature: string }).task_signature, /:workspace$/);
   assert.ok(output);
   const parsed = JSON.parse(output ?? "{}") as { hookSpecificOutput: { additionalContext: string } };
@@ -304,7 +321,7 @@ test("@aionis/claude-code SubagentStart injects role-aware shared team context",
     prompt: "Inspect the migration plan and summarize the active route.",
   }, baseOptions({ repo_root: dir }), fakeClient(calls));
 
-  assert.equal(calls[0].method, "guideForRole");
+  assert.equal(calls[0].method, "guideAgentContextForRole");
   const guide = calls[0].input as { agent_id: string; role: string; team_id: string; task_signature: string };
   assert.match(guide.agent_id, /^claude-code:subagent:Explore:/);
   assert.equal(guide.role, "planner");
@@ -394,7 +411,7 @@ test("@aionis/claude-code Agent tool result records evidence and refreshes paren
   }, baseOptions({ repo_root: dir }), fakeClient(calls));
 
   assert.equal(calls[0].method, "observeStep");
-  assert.equal(calls[1].method, "guideForRole");
+  assert.equal(calls[1].method, "guideAgentContextForRole");
   const observed = calls[0].input as { tool_set: string[]; memory_lane: string; team_id: string };
   assert.deepEqual(observed.tool_set, ["Agent"]);
   assert.equal(observed.memory_lane, "shared");

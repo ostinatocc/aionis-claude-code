@@ -27,7 +27,9 @@ npx @aionis/claude-code@latest onboard --base-url http://127.0.0.1:3101
 `onboard` installs the same hook + MCP integration through user-level Claude
 Code settings when you do not want to use plugins.
 
-Hooks call Aionis through the SDK:
+Hooks call Aionis through the SDK. Prompt injection uses the canonical
+`execution.guideAgentContextForRole().agent_prompt` path; the Claude Code
+package does not maintain a separate final-context renderer.
 
 - `SessionStart`: injects a compact Aionis activation context.
 - `UserPromptSubmit`: runs Aionis guide before every user prompt.
