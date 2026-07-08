@@ -66,17 +66,16 @@ function fakeClient(calls: Array<{ method: string; input?: unknown; options?: un
           guide,
           ...(contextOptions ?? {}),
         });
-        const agentPrompt = guide.agent_context.prompt_text;
         return {
           contract_version: "aionis_sdk_agent_context_with_evidence_v1",
           guide,
           compiled_context: compiled,
           agent_context: guide.agent_context,
-          agent_prompt: agentPrompt,
+          agent_prompt: compiled.agent_prompt,
           resolved_evidence: [],
           unresolved_memory_ids: [],
           evidence_char_count: 0,
-          prompt_char_count: agentPrompt.length,
+          prompt_char_count: compiled.agent_prompt.length,
           guide_trace_id: guide.guide_trace_id,
         };
       },
@@ -291,7 +290,7 @@ test("@aionis/claude-code dry-run install does not write files", async () => {
   );
 });
 
-test("@aionis/claude-code UserPromptSubmit injects SDK AgentContext prompt", async () => {
+test("@aionis/claude-code UserPromptSubmit injects full SDK AgentContext prompt", async () => {
   const calls: Array<{ method: string; input?: unknown; options?: unknown }> = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aionis-claude-code-hook-"));
   const output = await handleAionisClaudeCodeHook({
@@ -306,9 +305,9 @@ test("@aionis/claude-code UserPromptSubmit injects SDK AgentContext prompt", asy
   assert.ok(output);
   const parsed = JSON.parse(output ?? "{}") as { hookSpecificOutput: { additionalContext: string } };
   assert.match(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_MEMORY_CONTEXT/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_AGENT_CONTEXT v1/);
   assert.match(parsed.hookSpecificOutput.additionalContext, /CURRENT_ACTIVE_PATH/);
   assert.match(parsed.hookSpecificOutput.additionalContext, /Do not reuse/);
-  assert.doesNotMatch(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_AGENT_CONTEXT v1/);
 });
 
 test("@aionis/claude-code SubagentStart injects role-aware shared team context", async () => {
@@ -425,8 +424,8 @@ test("@aionis/claude-code Agent tool result records evidence and refreshes paren
   const parsed = JSON.parse(output ?? "{}") as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
   assert.equal(parsed.hookSpecificOutput.hookEventName, "PostToolUse");
   assert.match(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_MEMORY_CONTEXT/);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_AGENT_CONTEXT v1/);
   assert.match(parsed.hookSpecificOutput.additionalContext, /CURRENT_ACTIVE_PATH/);
-  assert.doesNotMatch(parsed.hookSpecificOutput.additionalContext, /AIONIS_EXECUTION_AGENT_CONTEXT v1/);
 });
 
 test("@aionis/claude-code PostToolUse keeps Runtime execution summaries bounded", async () => {

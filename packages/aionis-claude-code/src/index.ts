@@ -1135,7 +1135,6 @@ async function guideAdditionalContext(
     query_text: prompt,
     limit: 8,
     mode: options.mode ?? undefined,
-    context_mode: "compact_agent",
     context_char_budget: options.max_prompt_chars,
     context_optimization_profile: "balanced",
     context: {
