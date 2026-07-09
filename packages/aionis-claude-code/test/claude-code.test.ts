@@ -60,6 +60,24 @@ function fakeClient(calls: Array<{ method: string; input?: unknown; options?: un
             use_now_memory_ids: ["mem-current"],
             inspect_before_use_memory_ids: [],
             do_not_use_memory_ids: ["mem-failed"],
+            command_posture: [
+              {
+                posture: "should_continue",
+                surface: "current",
+                memory_id: "mem-current",
+                instruction: "Continue the verified Claude Code route.",
+                reason: "The current route was verified.",
+                target_files: ["src/route.ts"],
+              },
+              {
+                posture: "must_not",
+                surface: "do_not_use",
+                memory_id: "mem-failed",
+                instruction: "Do not reuse the retired implementation.",
+                reason: "The branch was retired.",
+                target_files: ["src/legacy-route.ts"],
+              },
+            ],
           },
         };
         const compiled = compileExecutionAgentContext({
